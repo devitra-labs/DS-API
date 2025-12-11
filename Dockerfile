@@ -1,21 +1,18 @@
 FROM php:8.2-fpm
 
-# Install MySQL/TiDB drivers
-RUN docker-php-ext-install pdo pdo_mysql mysqli
-
-# Install Nginx
 RUN apt-get update && apt-get install -y nginx && rm -rf /var/lib/apt/lists/*
 
-# Copy project
+RUN docker-php-ext-install pdo pdo_mysql mysqli
+
 COPY . /var/www/html/
 
-# Nginx config
-COPY nginx.conf /etc/nginx/nginx.conf
+# Copy nginx template
+COPY nginx.conf /etc/nginx/nginx.conf.template
 
-# Permission
-RUN chown -R www-data:www-data /var/www/html
+# Start script
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
 
-# Expose port
 EXPOSE 80
 
-CMD service nginx start && php-fpm
+CMD ["/start.sh"]
