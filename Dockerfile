@@ -1,25 +1,28 @@
 FROM php:8.2-fpm
 
-# Install nginx
-RUN apt-get update && apt-get install -y nginx && rm -rf /var/lib/apt/lists/*
+# 1. Install nginx DAN curl (curl wajib ada untuk download)
+RUN apt-get update && apt-get install -y nginx curl && rm -rf /var/lib/apt/lists/*
 
-# Install PHP extensions
+# 2. Install PHP extensions
 RUN docker-php-ext-install pdo pdo_mysql mysqli
 
-# Copy app (Salin semua file project)
+# 3. Copy app (Source code kamu)
 COPY . /var/www/html/
 
-# ### BARU: Salin cacert.pem ke folder sistem SSL agar path-nya PASTI dan AMAN
-COPY cacert.pem /etc/ssl/certs/tidb-cloud.pem
+# =======================================================
+# SOLUSI FIX: Download sertifikat langsung di sini
+# Jadi tidak peduli file ada di GitHub atau tidak
+# =======================================================
+RUN curl -o /etc/ssl/certs/tidb-cloud.pem https://curl.se/ca/cacert.pem
 
-# Copy nginx template
+# 4. Copy nginx template
 COPY nginx.conf.template /etc/nginx/nginx.conf.template
 
-# Copy start script
+# 5. Copy start script
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-# ### BARU: Ubah kepemilikan file ke www-data agar PHP bisa membacanya
+# 6. Ubah permission agar PHP bisa baca
 RUN chown -R www-data:www-data /var/www/html
 
 EXPOSE 80

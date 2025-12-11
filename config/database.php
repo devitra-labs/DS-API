@@ -24,8 +24,9 @@ if (!class_exists('Database')) {
                 $dsn .= ";charset=" . $this->charset;
             }
 
-            $ssl_ca = __DIR__ . '/cacert.pem';
-
+            //$ssl_ca = __DIR__ . '/cacert.pem';
+            $ssl_ca = '/etc/ssl/certs/tidb-cloud.pem';
+            
             // ---------------------------------------------------------
             // 2. LOGIKA DETEKSI VERSI PHP (AMAN)
             // ---------------------------------------------------------
