@@ -1,21 +1,14 @@
-# --- Base PHP image ---
-FROM php:8.2-cli
+FROM php:8.2-apache
 
-# --- Install required extensions for TiDB (MySQL) ---
-RUN apt-get update && apt-get install -y \
-    default-mysql-client \
-    libssl-dev \
-    libcurl4-openssl-dev \
-    && docker-php-ext-install pdo pdo_mysql
+# Install dependency untuk MySQL/TiDB + tools
+RUN docker-php-ext-install pdo pdo_mysql mysqli
 
-# --- Set working directory ---
-WORKDIR /app
+# Enable Apache mod_rewrite (optional)
+RUN a2enmod rewrite
 
-# --- Copy project files ---
-COPY . /app
+# Copy semua file project
+COPY . /var/www/html/
 
-# Railway runs service on port 8080
-EXPOSE 8080
-
-# --- Start PHP built-in server ---
-CMD ["php", "-S", "0.0.0.0:8080", "index.php"]
+# Permission storage/cache jika perlu
+RUN mkdir -p /var/www/html/storage/cache/bmkg \
+    && chmod -R 777 /var/www/html/storage
