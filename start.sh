@@ -15,4 +15,4 @@ nginx
 
 # Start PHP-FPM di foreground (agar container tidak mati)
 echo "Starting PHP-FPM..."
-php-fpm
+php-fpm 

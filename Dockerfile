@@ -9,24 +9,19 @@ RUN docker-php-ext-install pdo pdo_mysql mysqli
 # 3. Copy app
 COPY . /var/www/html/
 
-# 4. Download Certificate (SOLUSI CURL YANG KITA PAKAI TADI)
+# 4. Download Certificate
 RUN curl -o /etc/ssl/certs/tidb-cloud.pem https://curl.se/ca/cacert.pem
 
-# ==============================================================================
-# ### LOGGING FIX (TAMBAHKAN INI)
-# Ini memaksa PHP-FPM untuk menampilkan error pekerja (workers) ke log utama
-# Tanpa ini, error 500 akan tetap misterius.
-# ==============================================================================
-RUN echo "catch_workers_output = yes" >> /usr/local/etc/php-fpm.d/www.conf && \
-    echo "php_admin_flag[log_errors] = on" >> /usr/local/etc/php-fpm.d/www.conf && \
-    echo "php_admin_value[error_log] = /proc/self/fd/2" >> /usr/local/etc/php-fpm.d/www.conf
+# 5. COPY php.ini (INI YANG BARU)
+# Copy file konfigurasi error kita ke folder config PHP
+COPY php.ini /usr/local/etc/php/conf.d/custom.ini
 
-# 5. Copy nginx config & start script
+# 6. Copy nginx & start script
 COPY nginx.conf.template /etc/nginx/nginx.conf.template
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-# 6. Permissions
+# 7. Permissions
 RUN chown -R www-data:www-data /var/www/html
 
 EXPOSE 80
