@@ -1,10 +1,18 @@
 #!/bin/sh
 
-# Replace port
+# Pastikan script berhenti jika ada command yang error
+set -e
+
+# Ganti variabel __PORT__ di nginx.conf dengan port asli dari Railway
 sed "s/__PORT__/${PORT}/g" /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
 
-# Start nginx
+# Validasi config Nginx dulu sebelum dijalankan
+nginx -t
+
+# Start Nginx sebagai background process (Daemon)
+echo "Starting Nginx..."
 nginx
 
-# Start PHP-FPM
+# Start PHP-FPM di foreground (agar container tidak mati)
+echo "Starting PHP-FPM..."
 php-fpm
