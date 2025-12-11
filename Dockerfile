@@ -1,14 +1,21 @@
-FROM php:8.2-apache
+FROM php:8.2-fpm
 
-# Install dependency untuk MySQL/TiDB + tools
+# Install MySQL/TiDB drivers
 RUN docker-php-ext-install pdo pdo_mysql mysqli
 
-# Enable Apache mod_rewrite (optional)
-RUN a2enmod rewrite
+# Install Nginx
+RUN apt-get update && apt-get install -y nginx && rm -rf /var/lib/apt/lists/*
 
-# Copy semua file project
+# Copy project
 COPY . /var/www/html/
 
-# Permission storage/cache jika perlu
-RUN mkdir -p /var/www/html/storage/cache/bmkg \
-    && chmod -R 777 /var/www/html/storage
+# Nginx config
+COPY nginx.conf /etc/nginx/nginx.conf
+
+# Permission
+RUN chown -R www-data:www-data /var/www/html
+
+# Expose port
+EXPOSE 80
+
+CMD service nginx start && php-fpm
