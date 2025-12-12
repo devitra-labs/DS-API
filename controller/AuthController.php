@@ -1,4 +1,5 @@
 <?php
+// AuthController.php
 
 include_once 'config/database.php';
 include_once 'models/User.php';
@@ -10,25 +11,36 @@ class AuthController
 
     public function __construct()
     {
+        // 1. Koneksi Database Manual
         $database = new Database();
-        $this->db = $database->getConnection();
+        $this->db = $database->getConnection(); // Return $this (objek Database itu sendiri)
+        
+        // 2. Load Model
         $this->user = new User($this->db);
     }
 
     public function register($data)
     {
-        // Validation input
+        // Validasi Input
         if (!empty($data->name) && !empty($data->email) && !empty($data->password)) {
+            
             $this->user->name = $data->name;
             $this->user->email = $data->email;
             $this->user->password = password_hash($data->password, PASSWORD_BCRYPT);
 
-            if ($this->user->create()) {
-                http_response_code(201);
-                echo json_encode(['message' => 'User berhasil dibuat.']);
+            // Cek dulu apakah email sudah ada?
+            if ($this->user->emailExists()) {
+                http_response_code(400);
+                echo json_encode(['message' => 'Email sudah terdaftar.']);
             } else {
-                http_response_code(503);
-                echo json_encode(['message' => 'Gagal membuat user. Silahkan coba lagi.']);
+                // Jika belum ada, buat baru
+                if ($this->user->create()) {
+                    http_response_code(201);
+                    echo json_encode(['message' => 'User berhasil dibuat.', 'id' => $this->user->id]);
+                } else {
+                    http_response_code(503);
+                    echo json_encode(['message' => 'Gagal koneksi ke Firebase.']);
+                }
             }
         } else {
             http_response_code(400);
@@ -38,37 +50,43 @@ class AuthController
 
     public function login($data)
     {
-        $this->user->email = $data->email;
+        if(!empty($data->email) && !empty($data->password)) {
+            $this->user->email = $data->email;
 
-        // 1. Check apakah email ada di DB
-        if ($this->user->emailExists()) {
-            // 2. Verifikasi password (Input User vs Hash PW)
-            if (password_verify($data->password, $this->user->password)) {
+            // 1. Cek Email di Firebase
+            if ($this->user->emailExists()) {
                 
-                // 3. Check 'status'
-                if ($this->user->status == 1) {
-                    http_response_code(200);
-                    echo json_encode([
-                        'message' => 'Login Berhasil.',
-                        'user' => [
-                            'id' => $this->user->id,
-                            'name' => $this->user->name,
-                            'email' => $this->user->email,
-                        ],
-                        // Token JWT
-                        'token' => 'token_api_desaverse',
-                    ]);
+                // 2. Verifikasi Password
+                if (password_verify($data->password, $this->user->password)) {
+                    
+                    // 3. Cek Status Akun
+                    if ($this->user->status == 1) {
+                        http_response_code(200);
+                        echo json_encode([
+                            'message' => 'Login Berhasil.',
+                            'user' => [
+                                'id' => $this->user->id,
+                                'name' => $this->user->name,
+                                'email' => $this->user->email,
+                            ],
+                            'token' => 'desaverse-admin' 
+                        ]);
+                    } else {
+                        http_response_code(403);
+                        echo json_encode(['message' => 'Akun dinonaktifkan.']);
+                    }
                 } else {
-                    http_response_code(403);
-                    echo json_encode(['message' => 'Akun anda dinonaktifkan.']);
+                    http_response_code(401);
+                    echo json_encode(['message' => 'Password salah.']);
                 }
             } else {
-                http_response_code(401);
-                echo json_encode(['message' => 'Password salah.']);
+                http_response_code(404);
+                echo json_encode(['message' => 'Email tidak ditemukan.']);
             }
         } else {
-            http_response_code(404);
-            echo json_encode(['message' => 'Email tidak ditemukan']);
+            http_response_code(400);
+            echo json_encode(['message' => 'Email dan password wajib diisi.']);
         }
     }
 }
+?>

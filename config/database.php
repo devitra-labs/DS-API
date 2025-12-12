@@ -1,78 +1,54 @@
 <?php
-// ---------------------------------------------------------
-// 1. CONFIG ANTI-STRESS (WAJIB UTK API JSON)
-// ---------------------------------------------------------
-// Matikan tampilan error di layar agar JSON tidak rusak oleh teks "Deprecated"
-ini_set('display_errors', 0); 
-ini_set('display_startup_errors', 0);
+// config/database.php
+
+// Matikan error warning agar output JSON bersih
+ini_set('display_errors', 0);
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
 
-if (!class_exists('Database')) {
-    class Database {
-        private $host = "gateway01.ap-southeast-1.prod.aws.tidbcloud.com";
-        private $port = 4000;
-        private $db_name = "test";
-        private $username = "4DQTpKbtm8cDVGS.root";
-        private $password = "K5v9ZuijXLolryVJ";
-        private $charset = "utf8mb4";
+class Database {
+    // 1. URL Firebase kamu (sudah saya sesuaikan)
+    private $projectUrl = 'https://desaverse-8a6cb-default-rtdb.asia-southeast1.firebasedatabase.app';
+    
+    // 2. KODE RAHASIA (WAJIB DIGANTI)
+    // Ambil ini di Firebase Console > Project Settings > Service Accounts > Database Secrets
+    private $dbSecret = 'PN2NP7zgvewT2sPgxCytgqAzUGTmlnhWTCbzhVJb'; 
 
-        public function getConnection() {
-            $pdo = null;
-            $dsn = "mysql:host=" . $this->host . ";port=" . $this->port . ";dbname=" . $this->db_name;
-            
-            if (!empty($this->charset)) {
-                $dsn .= ";charset=" . $this->charset;
+    // Fungsi agar kompatibel dengan AuthController
+    public function getConnection() {
+        return $this;
+    }
+
+    // Fungsi inti komunikasi ke Firebase
+    public function request($path, $method = 'GET', $data = null) {
+        // Bersihkan path
+        if(substr($path, 0, 1) !== '/') $path = '/' . $path;
+        
+        // Buat URL lengkap dengan auth secret
+        $url = $this->projectUrl . $path . '.json?auth=' . $this->dbSecret;
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // Bypass SSL agar tidak error di localhost
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+
+        if ($method !== 'GET') {
+            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
+            if($data) {
+                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
             }
-
-            //$ssl_ca = __DIR__ . '/cacert.pem';
-            $ssl_ca = '/etc/ssl/certs/tidb-cloud.pem';
-            
-            // ---------------------------------------------------------
-            // 2. LOGIKA DETEKSI VERSI PHP (AMAN)
-            // ---------------------------------------------------------
-            // Kita cek dulu: Apakah konstanta BARU (PHP 8.4+) tersedia?
-            
-            $opts = [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_EMULATE_PREPARES => false,
-            ];
-
-            // --- SETTING SSL VERIFY ---
-            // Cek apakah Pdo\Mysql::ATTR_SSL_VERIFY_SERVER_CERT ada (PHP 8.4+)
-            if (defined('Pdo\Mysql::ATTR_SSL_VERIFY_SERVER_CERT')) {
-                $opts[constant('Pdo\Mysql::ATTR_SSL_VERIFY_SERVER_CERT')] = false;
-            } else {
-                // Fallback ke Integer 1014 untuk PHP lama (menghindari warning nama usang)
-                $opts[1014] = false; 
-            }
-
-            // --- SETTING SSL CA ---
-            if (file_exists($ssl_ca)) {
-                // Cek apakah Pdo\Mysql::ATTR_SSL_CA ada (PHP 8.4+)
-                if (defined('Pdo\Mysql::ATTR_SSL_CA')) {
-                    $opts[constant('Pdo\Mysql::ATTR_SSL_CA')] = $ssl_ca;
-                } else {
-                    // Fallback ke Integer 1012
-                    $opts[1012] = $ssl_ca;
-                }
-            }
-
-            try {
-                $pdo = new PDO($dsn, $this->username, $this->password, $opts);
-                return $pdo;
-            } catch (PDOException $e) {
-                // Pastikan respon error tetap dalam format JSON
-                header('Content-Type: application/json');
-                // Http response code 500 (Internal Server Error)
-                http_response_code(500); 
-                echo json_encode([
-                    "status" => "error", 
-                    "message" => "Database Connection Failed: " . $e->getMessage()
-                ]);
-                exit; // Stop script di sini agar tidak ada output lain
-            }
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
         }
+
+        $response = curl_exec($ch);
+        $error = curl_error($ch);
+        //curl_close($ch);
+
+        if ($error) {
+            return ["error" => $error];
+        }
+
+        return json_decode($response, true);
     }
 }
 ?>

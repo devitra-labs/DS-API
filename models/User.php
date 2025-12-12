@@ -1,65 +1,70 @@
 <?php
-// --- JURUS SAKTI PHP 8.2 ---
-// Baris ini memaksa PHP menerima variabel apa saja tanpa error Deprecated
+// models/User.php
+
 #[AllowDynamicProperties] 
 class User {
     private $conn;
     private $table_name = "users";
 
-    // Kamu boleh hapus public $id yang tadi, atau biarkan saja tidak masalah.
-    // Dengan adanya #[AllowDynamicProperties] di atas, kita tidak wajib menulisnya.
-    
-    public $id; 
+    public $id;
     public $name;
     public $email;
     public $password;
     public $status;
-    public $token; 
 
     public function __construct($db) {
         $this->conn = $db;
     }
 
-    // Fungsi Registrasi
+    // CREATE USER
     public function create() {
-        $query = "INSERT INTO " . $this->table_name . " SET name=:name, email=:email, password=:password, status=:status";
-        $stmt = $this->conn->prepare($query);
-
+        // Sanitasi
         $this->name = htmlspecialchars(strip_tags($this->name));
         $this->email = htmlspecialchars(strip_tags($this->email));
-        $this->password = htmlspecialchars(strip_tags($this->password));
+        // Password harus sudah di-hash dari controller, tapi kita amanin lagi
+        // $this->password = ... (sudah di hash di controller)
         $this->status = 1;
 
-        $stmt->bindParam(":name", $this->name);
-        $stmt->bindParam(":email", $this->email);
-        $stmt->bindParam(":password", $this->password);
-        $stmt->bindParam(":status", $this->status);
+        // LOGIKA KUNCI: Gunakan MD5 Email sebagai ID
+        // Ini pengganti "Auto Increment" agar kita bisa cari user by email dengan cepat
+        $userId = md5(strtolower($this->email));
+        $this->id = $userId;
 
-        if($stmt->execute()) {
+        $data = [
+            'id'      => $this->id,
+            'name'    => $this->name,
+            'email'   => $this->email,
+            'password'=> $this->password,
+            'status'  => $this->status,
+            'created' => date('Y-m-d H:i:s')
+        ];
+
+        // Kirim ke Firebase dengan method PUT (Simpan di laci khusus ID ini)
+        $path = $this->table_name . '/' . $userId;
+        $result = $this->conn->request($path, 'PUT', $data);
+
+        // Jika tidak ada error curl dan data tersimpan
+        if ($result && !isset($result['error'])) {
             return true;
         }
         return false;
     }
 
-    // Fungsi Cek Email untuk Login
+    // CEK EMAIL / LOGIN
     public function emailExists() {
-        $query = "SELECT id, name, password, status FROM " . $this->table_name . " WHERE email = ? LIMIT 0,1";
+        // Cari laci berdasarkan MD5 Email
+        $checkId = md5(strtolower($this->email));
+        $path = $this->table_name . '/' . $checkId;
+        
+        // Ambil data (GET)
+        $user = $this->conn->request($path, 'GET');
 
-        $stmt = $this->conn->prepare($query);
-        $this->email = htmlspecialchars(strip_tags($this->email));
-        $stmt->bindParam(1, $this->email);
-        $stmt->execute();
-
-        if($stmt->rowCount() > 0) {
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            // Dengan #[AllowDynamicProperties], bagian ini tidak akan error lagi
-            // Walaupun server "lupa" kalau ada public $id
-            $this->id = $row['id'];
-            $this->name = $row['name'];
-            $this->password = $row['password']; 
-            $this->status = $row['status'];
-
+        // Validasi: Firebase mengembalikan null jika data tidak ada
+        if ($user && !isset($user['error'])) {
+            $this->id = $user['id'];
+            $this->name = $user['name'];
+            $this->password = $user['password'];
+            $this->status = $user['status'];
             return true;
         }
         return false;

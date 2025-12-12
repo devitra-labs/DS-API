@@ -1,241 +1,165 @@
 <?php
-// =======================================================================
-// 1. KONFIGURASI DEBUGGING (PENTING UNTUK RAILWAY)
-// =======================================================================
-// Matikan tampilan error di browser (agar JSON tidak rusak)
-ini_set('display_errors', 0); 
-ini_set('display_startup_errors', 0);
+// ---------------------------------------------------------
+// 1. CONFIG HEADER (CORS & JSON)
+// ---------------------------------------------------------
+error_reporting(0); 
+ini_set('display_errors', 0);
 
-// Nyalakan pencatatan log sistem
-ini_set('log_errors', 1); 
-error_reporting(E_ALL);
-
-// KIRIM LOG KE OUTPUT CONSOLE RAILWAY
-// Ini kuncinya: agar kamu bisa baca errornya di menu "Logs" Railway
-ini_set('error_log', '/dev/stderr'); 
-
-// =======================================================================
-// 2. HEADER CORS & PREFLIGHT
-// =======================================================================
 header("Access-Control-Allow-Origin: *");
 header("Content-Type: application/json; charset=UTF-8");
-header("Access-Control-Allow-Methods: POST, GET, OPTIONS");
+header("Access-Control-Allow-Methods: POST, GET, OPTIONS, PUT, DELETE");
 header("Access-Control-Allow-Headers: Content-Type, Access-Control-Allow-Headers, Authorization, X-Requested-With");
 
-// Handle request OPTIONS (Preflight) agar tidak lanjut ke logic bawah
+// Handle Preflight Request
 if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
     http_response_code(200);
     exit();
 }
 
-try {
-    // =======================================================================
-    // 3. LOAD FILE DENGAN ABSOLUTE PATH (ANTI ERROR DOCKER)
-    // =======================================================================
-    
-    // Tentukan path file penting
-    $pathAuthController = __DIR__ . '/controller/AuthController.php';
-    $pathBootstrap      = __DIR__ . '/bootstrap.php';
+// ---------------------------------------------------------
+// 2. INCLUDE CONTROLLER & SERVICES
+// ---------------------------------------------------------
 
-    // Cek keberadaan file sebelum di-load (Debugging)
-    if (!file_exists($pathAuthController)) {
-        throw new Exception("CRITICAL: File AuthController tidak ditemukan di: " . $pathAuthController);
-    }
-    if (!file_exists($pathBootstrap)) {
-        throw new Exception("CRITICAL: File Bootstrap tidak ditemukan di: " . $pathBootstrap);
-    }
-
-    // Load File
-    include_once $pathAuthController;
-    include_once $pathBootstrap;
-
-    // =======================================================================
-    // 4. KONEKSI DATABASE
-    // =======================================================================
-    // Pastikan fungsi get_pdo ada (biasanya dari bootstrap.php)
-    if (!function_exists('get_pdo')) {
-        throw new Exception("CRITICAL: Fungsi get_pdo() tidak ditemukan. Cek isi bootstrap.php");
-    }
-
-    $pdo = get_pdo(); 
-
-} catch (Exception $e) {
-    // TANGKAP ERROR SETUP / KONEKSI
-    error_log("SETUP ERROR: " . $e->getMessage()); // Masuk ke Log Railway
-    http_response_code(500);
-    echo json_encode([
-        "status" => "error", 
-        "message" => "Server Setup Error (Cek Logs)", 
-        "debug_info" => $e->getMessage()
-    ]);
-    exit();
+// Load AuthController
+if (file_exists('AuthController.php')) {
+    include_once 'AuthController.php';
+} elseif (file_exists('controller/AuthController.php')) {
+    include_once 'controller/AuthController.php';
 }
 
-// =======================================================================
-// 5. ROUTING & LOGIC
-// =======================================================================
-
-// Ambil parameter action
-$action = $_REQUEST['action'] ?? '';
-
-// Jika action kosong, beri respons default (Health Check)
-if (empty($action)) {
-    echo json_encode(["status" => "ok", "message" => "API Ready. Available actions: register, login, bmkg_..."]);
-    exit();
+// Load BmkgService
+// Pastikan file BmkgService.php ada di folder Service
+if (file_exists('Service/BmkgService.php')) {
+    require_once 'Service/BmkgService.php';
+} elseif (file_exists('services/BmkgService.php')) {
+    require_once 'services/BmkgService.php';
 }
+
+// ---------------------------------------------------------
+// 3. UNIVERSAL INPUT PARSER (JSON / POST / GET)
+// ---------------------------------------------------------
+
+// A. Ambil Action
+$action = isset($_GET['action']) ? $_GET['action'] : '';
+
+// B. Ambil Data Body (JSON)
+$jsonInput = file_get_contents("php://input");
+$data = json_decode($jsonInput);
+
+// C. Fallback ke POST Form Data jika JSON kosong
+if (is_null($data)) {
+    $data = (object) $_POST;
+}
+
+// D. Gabungkan parameter GET (Query Params) agar fleksibel
+// Ini memungkinkan request seperti: ?action=bmkg_prakiraan&adm4=35.15.01.2001
+$params = ['email', 'password', 'name', 'adm4', 'desa'];
+foreach ($params as $param) {
+    if (empty($data->$param) && isset($_GET[$param])) {
+        $data->$param = $_GET[$param];
+    }
+}
+
+// ---------------------------------------------------------
+// 4. ROUTING / SWITCH CASE
+// ---------------------------------------------------------
 
 // Inisialisasi Controller
-$auth = new AuthController(); 
+$auth = class_exists('AuthController') ? new AuthController() : null;
 
 switch ($action) {
-    // --- AUTHENTICATION ---
+    
+    // --- AUTHENTICATION (FIREBASE) ---
     case 'register':
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-             $data = (object) $_POST;
-             if (empty($data->email) || empty($data->password)) {
-                 http_response_code(400);
-                 echo json_encode(['message' => 'Email dan Password wajib diisi']);
-                 exit();
-             }
-             $auth->register($data);
-        } else {
-            http_response_code(405);
-            echo json_encode(['message' => 'Register harus menggunakan POST']);
-        }
+        if ($auth) $auth->register($data);
+        else sendError("AuthController not found");
         break;
 
     case 'login':
-        // Support login via GET (URL) atau POST (Form)
-        $email = $_REQUEST['email'] ?? '';
-        $password = $_REQUEST['password'] ?? '';
-
-        if (empty($email) || empty($password)) {
-            http_response_code(400);
-            echo json_encode([
-                'status' => 'error',
-                'message' => 'Email dan password tidak boleh kosong'
-            ]);
-            exit();
-        }
-
-        $loginData = (object) [
-            'email' => $email,
-            'password' => $password
-        ];
-
-        $auth->login($loginData);
+        if ($auth) $auth->login($data);
+        else sendError("AuthController not found");
         break;
 
-    // --- BMKG SERVICES ---
-    
+    // --- BMKG: PRAKIRAAN CUACA (BY KODE ADM4) ---
+    // Contoh: ?action=bmkg_prakiraan&adm4=35.78.01.1002
     case 'bmkg_prakiraan':
-        $adm4 = $_REQUEST['adm4'] ?? '';
-        if (empty($adm4)) {
-            http_response_code(400);
-            echo json_encode(['message' => 'adm4 parameter is required']);
-            break;
-        }
-        
-        // Gunakan __DIR__ untuk include service
-        $servicePath = __DIR__ . '/Service/BmkgService.php';
-        if (file_exists($servicePath)) {
-            require_once $servicePath;
+        if (empty($data->adm4)) {
+            sendError("Parameter 'adm4' (Kode Wilayah) wajib diisi.", 400);
         } else {
-            http_response_code(500);
-            echo json_encode(['message' => 'File Service BmkgService.php tidak ditemukan']);
-            break;
-        }
-
-        try {
-            $bmkg = new BmkgService();
-            $result = $bmkg->fetchPrakiraanCuacaPublic($adm4);
-            echo json_encode($result);
-        } catch (Exception $e) {
-            error_log("BMKG Error: " . $e->getMessage());
-            http_response_code(500);
-            echo json_encode(['message' => 'BMKG error: ' . $e->getMessage()]);
+            handleBmkgRequest(function($bmkg) use ($data) {
+                return $bmkg->fetchPrakiraanCuacaPublic($data->adm4);
+            });
         }
         break;
 
+    // --- BMKG: NOWCAST / PERINGATAN DINI ---
+    // Contoh: ?action=bmkg_nowcast
     case 'bmkg_nowcast':
-        $servicePath = __DIR__ . '/Service/BmkgService.php';
-        require_once $servicePath;
-        try {
-            $bmkg = new BmkgService();
-            $result = $bmkg->fetchNowcastAlerts();
-            echo json_encode($result);
-        } catch (Exception $e) {
-            error_log("BMKG Error: " . $e->getMessage());
-            http_response_code(500);
-            echo json_encode(['message' => 'BMKG error: ' . $e->getMessage()]);
-        }
+        handleBmkgRequest(function($bmkg) {
+            return $bmkg->fetchNowcastAlerts();
+        });
         break;
 
+    // --- BMKG: PRAKIRAAN CUACA (BY NAMA DESA) ---
+    // Contoh: ?action=bmkg_prakiraan_desa&desa=Sukamaju
+    // Butuh file config/admin4_lookup.json
     case 'bmkg_prakiraan_desa':
-        $desa = $_REQUEST['desa'] ?? '';
-        if (empty($desa)) {
-            http_response_code(400);
-            echo json_encode(['message' => 'desa parameter is required']);
-            break;
-        }
-        require_once __DIR__ . '/Service/BmkgService.php';
-        try {
-            $bmkg = new BmkgService();
-            $adm4 = $bmkg->resolveAdmin4ForDesa($desa);
-            if (!$adm4) {
-                http_response_code(404);
-                echo json_encode(['message' => 'adm4 tidak ditemukan untuk desa ini']);
-                break;
-            }
-            $prakiraan = $bmkg->fetchPrakiraanCuacaPublic($adm4);
-            $nowcast = $bmkg->fetchNowcastAlerts();
-            $response = [
-                'desa' => $desa,
-                'adm4' => $adm4,
-                'prakiraan' => $prakiraan,
-                'nowcast_alerts' => $nowcast
-            ];
-            echo json_encode($response);
-        } catch (Exception $e) {
-            error_log("BMKG Error: " . $e->getMessage());
-            http_response_code(500);
-            echo json_encode(['message' => 'BMKG error: ' . $e->getMessage()]);
-        }
-        break;
+        if (empty($data->desa)) {
+            sendError("Parameter 'desa' wajib diisi.", 400);
+        } else {
+            handleBmkgRequest(function($bmkg) use ($data) {
+                // 1. Cari kode ADM4 berdasarkan nama desa
+                $adm4 = $bmkg->resolveAdmin4ForDesa($data->desa);
+                
+                if (!$adm4) {
+                    throw new Exception("Desa '{$data->desa}' tidak ditemukan dalam database lookup.");
+                }
 
-    case 'bmkg_latest':
-        $adm4Val = $_REQUEST['adm4'] ?? '';
-        if (empty($adm4Val)) {
-            http_response_code(400);
-            echo json_encode(['message' => 'adm4 parameter is required']);
-            break;
-        }
-        try {
-            // Gunakan __DIR__ untuk Models
-            require_once __DIR__ . '/app/Models/BmkgPrakiraanModel.php';
-            require_once __DIR__ . '/app/Models/BmkgNowcastModel.php';
-            
-            $prakiraanModel = new BmkgPrakiraanModel($pdo);
-            $nowcastModel = new BmkgNowcastModel($pdo);
-            
-            $prakiraanLatest = $prakiraanModel->getLatestByAdm4($adm4Val);
-            $nowcastLatest  = $nowcastModel->getLatestByAdm4($adm4Val);
-            $resp = [
-                'adm4' => $adm4Val,
-                'prakiraan_latest' => $prakiraanLatest,
-                'nowcast_latest' => $nowcastLatest
-            ];
-            echo json_encode($resp);
-        } catch (Exception $e) {
-            error_log("BMKG Latest Error: " . $e->getMessage());
-            http_response_code(500);
-            echo json_encode(['message' => 'BMKG latest error: ' . $e->getMessage()]);
+                // 2. Ambil cuaca berdasarkan kode ADM4 yang ditemukan
+                $weather = $bmkg->fetchPrakiraanCuacaPublic($adm4);
+                
+                // 3. Gabungkan hasil
+                return [
+                    'desa_request' => $data->desa,
+                    'adm4_found' => $adm4,
+                    'data' => $weather
+                ];
+            });
         }
         break;
 
     default:
-        http_response_code(404);
-        echo json_encode(['message' => 'Endpoint action tidak ditemukan: ' . $action]);
+        sendError("Endpoint tidak ditemukan. Gunakan ?action=register, login, bmkg_prakiraan, atau bmkg_nowcast", 404);
         break;
+}
+
+// ---------------------------------------------------------
+// 5. HELPER FUNCTIONS
+// ---------------------------------------------------------
+
+function sendError($message, $code = 500) {
+    http_response_code($code);
+    echo json_encode(["status" => "error", "message" => $message]);
+    exit();
+}
+
+/**
+ * Wrapper function untuk menangani Request BMKG dengan Try-Catch
+ */
+function handleBmkgRequest($callback) {
+    // Cek apakah class BmkgService ada
+    if (!class_exists('BmkgService')) {
+        sendError("Service BMKG tidak ditemukan / file belum di-include.");
+        return;
+    }
+
+    try {
+        $bmkg = new BmkgService();
+        $result = $callback($bmkg); // Jalankan fungsi spesifik
+        echo json_encode($result);
+    } catch (Exception $e) {
+        // Tangkap error dari BmkgService (misal: Koneksi timeout / Data kosong)
+        sendError("BMKG Error: " . $e->getMessage());
+    }
 }
 ?>
